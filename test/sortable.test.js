@@ -1,0 +1,34 @@
+import { beforeEach, afterEach, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { act, createElement as element } from 'react';
+import { setupDOM, key } from './helpers/dom.js';
+import Sortable, { arrayMove } from '../src/index.js';
+let ui;
+beforeEach(async () => { ui = await setupDOM(); });
+afterEach(async () => ui.cleanup());
+const items = [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Beta' }, { id: 'c', name: 'Gamma' }];
+test('arrayMove is immutable and checks boundaries', () => { assert.deepEqual(arrayMove([1, 2, 3], 0, 2), [2, 3, 1]); assert.throws(() => arrayMove([1], 0, 2), RangeError); });
+test('keyboard reorders only on drop and Escape rolls back', async () => {
+  const changes = [];
+  await ui.render(element(Sortable, { defaultItems: items, onChange: (next) => changes.push(next.map((item) => item.id)) }));
+  const first = ui.container.querySelector('[aria-label="Move Alpha"]');
+  await key(first, ' '); await key(first, 'ArrowDown');
+  assert.equal(changes.length, 0);
+  assert.equal(ui.container.querySelector('[role="listitem"]').textContent, 'Beta');
+  await key(first, ' ');
+  assert.deepEqual(changes[0], ['b', 'a', 'c']);
+  await key(first, ' '); await key(first, 'ArrowDown'); await key(first, 'Escape');
+  assert.equal(changes.length, 1);
+  assert.equal(ui.container.querySelectorAll('[role="listitem"]')[1].textContent, 'Alpha');
+});
+test('pointer handles reorder by row centers and disabled rows cannot be grabbed', async () => {
+  const changes = [];
+  await ui.render(element(Sortable, { defaultItems: items, disabledIds: ['b'], onChange: (next) => changes.push(next.map((item) => item.id)) }));
+  assert.equal(ui.container.querySelector('[aria-label="Move Beta"]').disabled, true);
+  [...ui.container.querySelectorAll('[role="listitem"]')].forEach((row, index) => { row.getBoundingClientRect = () => ({ top: index * 40, height: 40, left: 0, width: 200 }); });
+  const pointer = (target, type, y) => act(() => { const event = new window.Event(type, { bubbles: true, cancelable: true }); Object.assign(event, { button: 0, pointerId: 1, clientY: y, clientX: 10, isPrimary: true }); target.dispatchEvent(event); });
+  await pointer(ui.container.querySelector('[aria-label="Move Alpha"]'), 'pointerdown', 10);
+  await pointer(document, 'pointermove', 100);
+  await pointer(document, 'pointerup', 100);
+  assert.deepEqual(changes[0], ['b', 'c', 'a']);
+});
